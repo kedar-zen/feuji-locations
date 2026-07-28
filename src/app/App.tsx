@@ -142,7 +142,7 @@ const TagMarker = forwardRef<HTMLDivElement, {
       src={image}
       alt=""
       style={{
-        width:      248,
+        width:      165,
         height:     "auto",
         maxWidth:   "none",
         flexShrink: 0,
