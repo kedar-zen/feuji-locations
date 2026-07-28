@@ -91,7 +91,7 @@ function Info() {
 function Details() {
   return (
     <div className="bg-white content-stretch flex flex-col gap-[40px] items-start p-[24px] relative rounded-[24px] shrink-0 w-full" data-name="Details">
-      <p className="[word-break:break-word] font-['Cabinet_Grotesk_Variable:Medium',sans-serif] font-medium leading-[29px] relative shrink-0 text-[#0b1f3a] text-[24px] tracking-[-1px] w-full">San José, COSTA RICA</p>
+      <p className="[word-break:break-word] font-['Cabinet_Grotesk_Variable:Medium',sans-serif] font-medium leading-[29px] relative shrink-0 text-[#0b1f3a] text-[24px] tracking-[-1px] w-full">San José, Costa Rica</p>
       <Info />
     </div>
   );

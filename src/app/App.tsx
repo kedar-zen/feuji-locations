@@ -13,6 +13,11 @@ import San from "../imports/San";
 import Hyd from "../imports/Hyd";
 import Viz from "../imports/Viz";
 
+import imgDal from "../../assets/image-DAL.png";
+import imgSan from "../../assets/image-SAN.png";
+import imgHyd from "../../assets/image-HYD.png";
+import imgViz from "../../assets/image-VIZ.png";
+
 // ── constants ────────────────────────────────────────────────────────────────
 const GLOBE_RADIUS  = 1.933;
 const TILT_X        = 22 * (Math.PI / 180);
@@ -28,14 +33,14 @@ const GRID_LON      = 36;
 const GRID_SUB      = 128;
 const BORDER_SUB    = 5;
 const ANTART_ID     = "010";
-const BG            = "#0b203b";
+const BG            = "#0B1F3A";
 
 // ── city definitions ─────────────────────────────────────────────────────────
 const CITIES = [
-  { lat:  32.7767, lon:  -96.7970, name: "Dallas, Texas, USA",   variant: "up"   as "up" | "down", Card: Dal },
-  { lat:   9.9281, lon:  -84.0907, name: "San José, Costa Rica",  variant: "up"   as "up" | "down", Card: San },
-  { lat:  17.3850, lon:   78.4867, name: "Hyderabad, India",      variant: "up"   as "up" | "down", Card: Hyd },
-  { lat:  17.6868, lon:   83.2185, name: "Visakhapatnam, India",  variant: "down" as "up" | "down", Card: Viz },
+  { lat:  32.7767, lon:  -96.7970, name: "Dallas, Texas, USA",   variant: "up"   as "up" | "down", Card: Dal, image: imgDal },
+  { lat:   9.9281, lon:  -84.0907, name: "San José, Costa Rica",  variant: "up"   as "up" | "down", Card: San, image: imgSan },
+  { lat:  17.3850, lon:   78.4867, name: "Hyderabad, India",      variant: "up"   as "up" | "down", Card: Hyd, image: imgHyd },
+  { lat:  17.6868, lon:   83.2185, name: "Visakhapatnam, India",  variant: "down" as "up" | "down", Card: Viz, image: imgViz },
 ];
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -83,10 +88,11 @@ const TagMarker = forwardRef<HTMLDivElement, {
   name: string;
   variant: "up" | "down";
   isActive: boolean;
+  image: string;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onClick: () => void;
-}>(({ name, variant, isActive, onMouseEnter, onMouseLeave, onClick }, ref) => {
+}>(({ name, variant, isActive, image, onMouseEnter, onMouseLeave, onClick }, ref) => {
   const isUp = variant === "up";
 
   const pill = (
@@ -128,6 +134,24 @@ const TagMarker = forwardRef<HTMLDivElement, {
     }} />
   );
 
+  // Only shown for the active city, sitting right above its pill. The source
+  // image already bakes in its own cutout/gradient background, so it's shown
+  // as-is at full natural aspect — no crop, no circle mask.
+  const thumbnail = isActive && (
+    <img
+      src={image}
+      alt=""
+      style={{
+        width:      248,
+        height:     "auto",
+        maxWidth:   "none",
+        flexShrink: 0,
+        marginBottom: 8,
+        filter:     "drop-shadow(0 4px 10px rgba(0,0,0,0.35))",
+      }}
+    />
+  );
+
   return (
     <div
       ref={ref}
@@ -151,7 +175,9 @@ const TagMarker = forwardRef<HTMLDivElement, {
         willChange:     "left, top, opacity",
       }}
     >
-      {isUp ? <>{pill}{line}{dot}</> : <>{dot}{line}{pill}</>}
+      {isUp
+        ? <>{thumbnail}{pill}{line}{dot}</>
+        : <>{dot}{line}{pill}{thumbnail}</>}
     </div>
   );
 });
@@ -171,9 +197,10 @@ interface GlobeProps {
   tagHoveredRef: React.MutableRefObject<boolean>;
   gotoRef: React.MutableRefObject<number | null>;
   autoStopRef: React.MutableRefObject<boolean>;
+  onDragStart: () => void;
 }
 
-function Globe({ onFrameRef, tagHoveredRef, gotoRef, autoStopRef }: GlobeProps) {
+function Globe({ onFrameRef, tagHoveredRef, gotoRef, autoStopRef, onDragStart }: GlobeProps) {
   const mountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -258,7 +285,7 @@ function Globe({ onFrameRef, tagHoveredRef, gotoRef, autoStopRef }: GlobeProps) 
     let auto     = true;
 
     const cv = renderer.domElement;
-    const onDown = (e: PointerEvent) => { dragging = true; auto = false; prevX = e.clientX; spinVel = 0; cv.setPointerCapture(e.pointerId); };
+    const onDown = (e: PointerEvent) => { dragging = true; auto = false; prevX = e.clientX; spinVel = 0; gotoRef.current = null; onDragStart(); cv.setPointerCapture(e.pointerId); };
     const onMove = (e: PointerEvent) => { if (!dragging) return; spinVel = (e.clientX - prevX) * DRAG_SENS; group.rotation.y += spinVel; prevX = e.clientX; };
     const onUp   = () => { dragging = false; };
 
@@ -391,6 +418,13 @@ export default function App() {
 
   const markHover = useCallback((on: boolean) => { tagHoveredRef.current = on; }, []);
 
+  // Manually rotating the globe abandons whatever city was selected —
+  // also lets auto-rotate resume once inertia decays back to idle.
+  const deselectCity = useCallback(() => {
+    setActiveCity(null);
+    autoStopRef.current = false;
+  }, []);
+
   // Called every animation frame — updates tag marker DOM positions directly
   const onFrameRef = useRef((data: CityFrameData[]) => {
     data.forEach((d, i) => {
@@ -501,7 +535,16 @@ export default function App() {
         boxSizing:      "border-box",
       }}>
         <div style={{ position: "relative", width: globeSize, height: globeSize }}>
-          <Globe onFrameRef={onFrameRef} tagHoveredRef={tagHoveredRef} gotoRef={gotoRef} autoStopRef={autoStopRef} />
+          {/* Subtle glow behind the globe */}
+          <div style={{
+            position:      "absolute",
+            inset:         "-15%",
+            background:    "radial-gradient(circle at center, rgba(90,150,255,0.45) 0%, rgba(90,150,255,0.18) 40%, transparent 70%)",
+            pointerEvents: "none",
+            zIndex:        -1, // negative so it paints behind the (unpositioned) canvas div, not on top of it
+          }} />
+
+          <Globe onFrameRef={onFrameRef} tagHoveredRef={tagHoveredRef} gotoRef={gotoRef} autoStopRef={autoStopRef} onDragStart={deselectCity} />
 
           {/* Overlay: same footprint as globe, overflow visible so pill labels can extend outside */}
           <div style={{
@@ -518,6 +561,7 @@ export default function App() {
                 name={city.name}
                 variant={city.variant}
                 isActive={activeCity === i}
+                image={city.image}
                 onMouseEnter={() => markHover(true)}
                 onMouseLeave={() => markHover(false)}
                 onClick={() => selectCity(i)}
