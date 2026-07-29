@@ -447,26 +447,30 @@ export default function App() {
   return (
     <div style={{
       width:               "100vw",
-      minHeight:           "100vh",
+      height:              "100vh",
       background:          BG,
       display:             "grid",
       gridTemplateColumns: "repeat(12, 1fr)",
       columnGap:           GRID_GUTTER,
       padding:             `0 ${GRID_MARGIN}px`,
       boxSizing:            "border-box",
+      overflow:             "hidden",
       position:             "relative",
     }}>
       {/* Left — menu + info card (4 cols). paddingTop anchors the menu at a
-          fixed position. No internal scroll — the column grows with its
-          content and the whole page scrolls, so nothing gets clipped. */}
+          fixed position. minHeight:0 lets overflowY:auto engage as a fallback
+          (long addresses on short viewports) instead of the grid track
+          growing past 100vh and getting hard-clipped. */}
       <div style={{
         gridColumn:     "1 / span 4",
+        height:         "100%",
+        minHeight:      0,
         display:        "flex",
         flexDirection:  "column",
-        paddingTop:     "12vh",
-        paddingBottom:  "12vh",
+        justifyContent: "center",
         gap:            32,
         boxSizing:      "border-box",
+        overflowY:      "auto",
         zIndex:         20,
       }}>
         {/* Menu */}
@@ -523,27 +527,16 @@ export default function App() {
         )}
       </div>
 
-      {/* Right — globe (8 cols). No explicit height — stretches to match the
-          grid row (driven by the left column's content), same as the left
-          column, so the whole canvas is exactly the size of its children
-          and scrolls as one page instead of clipping or pinning either side. */}
+      {/* Right — globe (8 cols), fixed to the viewport height. */}
       <div ref={globeHalfRef} style={{
         gridColumn:     "5 / span 8",
+        height:         "100%",
         display:        "flex",
         alignItems:     "center",
         justifyContent: "center",
         boxSizing:      "border-box",
       }}>
         <div style={{ position: "relative", width: globeSize, height: globeSize }}>
-          {/* Subtle glow behind the globe */}
-          <div style={{
-            position:      "absolute",
-            inset:         "-15%",
-            background:    "radial-gradient(circle at center, rgba(90,150,255,0.45) 0%, rgba(90,150,255,0.18) 40%, transparent 70%)",
-            pointerEvents: "none",
-            zIndex:        -1, // negative so it paints behind the (unpositioned) canvas div, not on top of it
-          }} />
-
           <Globe onFrameRef={onFrameRef} tagHoveredRef={tagHoveredRef} gotoRef={gotoRef} autoStopRef={autoStopRef} onDragStart={deselectCity} />
 
           {/* Overlay: same footprint as globe, overflow visible so pill labels can extend outside */}
