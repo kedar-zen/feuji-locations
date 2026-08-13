@@ -37,7 +37,7 @@ const BG            = "#0B1F3A";
 
 // ── city definitions ─────────────────────────────────────────────────────────
 const CITIES = [
-  { lat:  32.7767, lon:  -96.7970, name: "Dallas, Texas, USA",   variant: "up"   as "up" | "down", Card: Dal, image: imgDal },
+  { lat:  32.7767, lon:  -96.7970, name: "Dallas, Texas, USA (Headquarters)",   variant: "up"   as "up" | "down", Card: Dal, image: imgDal },
   { lat:   9.9281, lon:  -84.0907, name: "San José, Costa Rica",  variant: "up"   as "up" | "down", Card: San, image: imgSan },
   { lat:  17.3850, lon:   78.4867, name: "Hyderabad, India",      variant: "up"   as "up" | "down", Card: Hyd, image: imgHyd },
   { lat:  17.6868, lon:   83.2185, name: "Visakhapatnam, India",  variant: "down" as "up" | "down", Card: Viz, image: imgViz },
@@ -134,22 +134,34 @@ const TagMarker = forwardRef<HTMLDivElement, {
     }} />
   );
 
-  // Only shown for the active city, sitting right above its pill. The source
-  // image already bakes in its own cutout/gradient background, so it's shown
-  // as-is at full natural aspect — no crop, no circle mask.
+  // Only shown for the active city, sitting right next to its pill (above
+  // for "up", below for "down") — margin goes on whichever side actually
+  // faces the pill so the gap is visible instead of trailing off the stack.
+  // overflow:hidden on the wrapper clips the photo to the same radius as the
+  // border, instead of relying on border-radius on the <img> itself (which
+  // doesn't reliably clip content flush with the border corners).
   const thumbnail = isActive && (
-    <img
-      src={image}
-      alt=""
-      style={{
-        width:      165,
-        height:     "auto",
-        maxWidth:   "none",
-        flexShrink: 0,
-        marginBottom: 8,
-        filter:     "drop-shadow(0 4px 10px rgba(0,0,0,0.35))",
-      }}
-    />
+    <div style={{
+      width:        206,
+      flexShrink:   0,
+      marginBottom: isUp ? 8 : 0,
+      marginTop:    isUp ? 0 : 8,
+      border:       "1px solid white",
+      borderRadius: 8,
+      overflow:     "hidden",
+      filter:       "drop-shadow(0 4px 10px rgba(0,0,0,0.35))",
+    }}>
+      <img
+        src={image}
+        alt=""
+        style={{
+          display:  "block",
+          width:    "100%",
+          height:   "auto",
+          maxWidth: "none",
+        }}
+      />
+    </div>
   );
 
   return (
