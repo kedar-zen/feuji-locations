@@ -18,7 +18,7 @@ import imgSan from "../../assets/image-SAN.png";
 import imgHyd from "../../assets/image-HYD.png";
 import imgViz from "../../assets/image-VIZ.png";
 
-// ── constants ────────────────────────────────────────────────────────────────
+// ── globe constants ─────────────────────────────────────────────────────────
 const GLOBE_RADIUS  = 1.933;
 const TILT_X        = 22 * (Math.PI / 180);
 const BORDER_COLOR  = "rgba(255,255,255,0.55)";
@@ -36,11 +36,13 @@ const ANTART_ID     = "010";
 const BG            = "#0B1F3A";
 
 // ── city definitions ─────────────────────────────────────────────────────────
+// imgSide only matters on desktop (row layout), where the thumbnail sits
+// beside the pill instead of above/below it — see TagMarker's `sideBySide`.
 const CITIES = [
-  { lat:  32.7767, lon:  -96.7970, name: "Dallas, Texas, USA (Headquarters)",   variant: "up"   as "up" | "down", Card: Dal, image: imgDal },
-  { lat:   9.9281, lon:  -84.0907, name: "San José, Costa Rica",  variant: "up"   as "up" | "down", Card: San, image: imgSan },
-  { lat:  17.3850, lon:   78.4867, name: "Hyderabad, India",      variant: "up"   as "up" | "down", Card: Hyd, image: imgHyd },
-  { lat:  17.6868, lon:   83.2185, name: "Visakhapatnam, India",  variant: "down" as "up" | "down", Card: Viz, image: imgViz },
+  { lat:  32.7767, lon:  -96.7970, name: "Dallas, Texas, USA (Headquarters)",   variant: "up"   as "up" | "down", imgSide: "right" as "left" | "right", Card: Dal, image: imgDal },
+  { lat:   9.9281, lon:  -84.0907, name: "San José, Costa Rica",  variant: "up"   as "up" | "down", imgSide: "left"  as "left" | "right", Card: San, image: imgSan },
+  { lat:  17.3850, lon:   78.4867, name: "Hyderabad, India",      variant: "up"   as "up" | "down", imgSide: "right" as "left" | "right", Card: Hyd, image: imgHyd },
+  { lat:  17.6868, lon:   83.2185, name: "Visakhapatnam, India",  variant: "down" as "up" | "down", imgSide: "left"  as "left" | "right", Card: Viz, image: imgViz },
 ];
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -77,6 +79,107 @@ function ringLine(coords: number[][], r: number, mat: THREE.LineBasicMaterial): 
   return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
 }
 
+// ── TagMarker sizing ─────────────────────────────────────────────────────────
+// Base (desktop, scale=1) pixel sizes for TagMarker parts — shared between the
+// marker itself and the reserved-space calculation below so they never drift apart.
+const TAG_BASE = { thumb: 206, gap: 8, pill: 57, line: 75, dot: 8 };
+
+// Scales a TagMarker dimension for the current breakpoint, with a floor so
+// text/touch targets stay legible even at the smallest scale.
+function tagPx(value: number, min: number, scale: number): number {
+  return Math.max(min, Math.round(value * scale));
+}
+
+// Pill(57) + line(75) + dot(8) — the headroom an "up" marker's popup needs
+// above its globe point. Reserved above the globe so the pill never clips
+// against the panel's top edge. Mirrors the same floors TagMarker uses so
+// it stays accurate at any scale.
+//
+// Deliberately does NOT budget for the thumbnail (206px) on top of that:
+// with the fixed 22° tilt, none of the real CITIES latitudes put a pin
+// anywhere near the box's top edge, so a thumbnail never actually needs
+// extra headroom beyond the pill/line/dot above — budgeting the full
+// thumbnail height "just in case" only produced a large, permanently empty
+// gap above the globe. If a future city is added far enough north/south
+// that its thumbnail does clip, revisit this rather than reintroducing a
+// blanket worst-case reserve.
+function tagStackReserve(scale: number): number {
+  return (
+    tagPx(TAG_BASE.pill,   38, scale) +
+    tagPx(TAG_BASE.line,   28, scale) +
+    tagPx(TAG_BASE.dot,     6, scale) +
+    6 // safety buffer
+  );
+}
+
+// ── responsive design tokens ────────────────────────────────────────────────
+// Reference screens from the design spec: Desktop 1440, Tablet 768, Mobile 402.
+// `getBreakpoint` still picks desktop/tablet/mobile design tokens (fonts,
+// margins, tag scale) purely off width, but the structural row↔stacked
+// switch is separate — see STACK_BELOW_W — and only lands on "desktop"
+// tokens at full desktop width (≥1440px, see STACK_BELOW_W below).
+type Breakpoint = "desktop" | "tablet" | "mobile";
+
+function getBreakpoint(w: number): Breakpoint {
+  if (w < 768)  return "mobile";
+  if (w < 1024) return "tablet";
+  return "desktop";
+}
+
+function useViewportSize(): { w: number; h: number } {
+  const [size, setSize] = useState(() => ({
+    w: typeof window !== "undefined" ? window.innerWidth  : 1440,
+    h: typeof window !== "undefined" ? window.innerHeight : 900,
+  }));
+  useEffect(() => {
+    const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return size;
+}
+
+// Below this viewport height, the globe box's usual "fit within cqh minus the
+// tag-popup headroom" formula runs out of room and collapses toward zero —
+// crushing the pill labels into an overlapping mess (landscape phones, short
+// laptop/browser windows). Below the threshold we stop sizing the globe off
+// viewport height entirely and fall back to a width-driven, naturally-tall,
+// page-scrolling layout instead.
+const SHORT_VIEWPORT_H = 600;
+
+// Below this viewport width, the layout switches to the stacked (globe on
+// top, menu below, page scrolls) arrangement regardless of the desktop/
+// tablet/mobile breakpoint — the row layout's fixed-width menu column only
+// has room to breathe above this width.
+const STACK_BELOW_W = 1000;
+
+interface LayoutConfig {
+  margin:         number;  // outer horizontal padding
+  gutter:         number;  // gap between menu/globe columns (row layouts)
+  columns:        number;  // grid column count (row layouts)
+  menuCols:       number;  // menu's column span
+  globeCols:      number;  // globe's column span
+  tagScale:       number;  // TagMarker pill/line/dot/thumbnail scale
+  menuFont:       number;
+  menuLineHeight: number;
+  menuPadding:    string;
+  menuGap:        number;  // gap between the city list and the info card
+}
+
+// Values from the design spec's Desktop(1440) / Tablet(768) / Mobile(402)
+// columns. Menu:globe column ratio (1:2) is preserved across breakpoints.
+const LAYOUTS: Record<Breakpoint, LayoutConfig> = {
+  desktop: { margin: 80, gutter: 20, columns: 12, menuCols: 4, globeCols: 8, tagScale: 1,    menuFont: 20, menuLineHeight: 29, menuPadding: "16px 4px", menuGap: 32 },
+  tablet:  { margin: 40, gutter: 20, columns: 6,  menuCols: 2, globeCols: 4, tagScale: 0.82, menuFont: 18, menuLineHeight: 26, menuPadding: "14px 4px", menuGap: 28 },
+  mobile:  { margin: 20, gutter: 16, columns: 4,  menuCols: 4, globeCols: 4, tagScale: 0.6,  menuFont: 16, menuLineHeight: 24, menuPadding: "12px 4px", menuGap: 24 },
+};
+
+// React's CSSProperties type doesn't know about CSS custom properties or
+// some newer properties (container-type, aspect-ratio queries via cq units).
+// This lets us pass them through inline styles without fighting the compiler —
+// there's no tsc build gate in this project (esbuild strips types unchecked).
+type CSSVars = React.CSSProperties & Record<string, string | number | undefined>;
+
 // ── TagMarker ────────────────────────────────────────────────────────────────
 // Pill label + connecting line + glowing square dot.
 // variant="up"   → label above, dot below  (anchor = dot = bottom-center)
@@ -84,35 +187,44 @@ function ringLine(coords: number[][], r: number, mat: THREE.LineBasicMaterial): 
 // Position is driven imperatively via style.left / style.top by the animation loop.
 // transform: translate(-50%, -100%) for "up" → bottom-center at (left, top)
 // transform: translate(-50%, 0%)   for "down" → top-center at (left, top)
+//
+// `sideBySide` (desktop/row layout only) moves the active thumbnail from
+// stacked-above/below-the-pill to floating beside it (imgSide: left/right),
+// absolutely positioned off the pill so it doesn't affect the pill/line/dot
+// column's own centering or the anchor math above.
 const TagMarker = forwardRef<HTMLDivElement, {
   name: string;
   variant: "up" | "down";
   isActive: boolean;
   image: string;
+  scale: number;
+  sideBySide: boolean;
+  imgSide: "left" | "right";
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onClick: () => void;
-}>(({ name, variant, isActive, image, onMouseEnter, onMouseLeave, onClick }, ref) => {
+}>(({ name, variant, isActive, image, scale, sideBySide, imgSide, onMouseEnter, onMouseLeave, onClick }, ref) => {
   const isUp = variant === "up";
+  const px = (v: number, min: number) => tagPx(v, min, scale);
 
   const pill = (
     <div style={{
       background:   "white",
       borderRadius: 1000,
       border:       "1px solid #fe5732",
-      height:       57,
-      padding:      "0 24px",
+      height:       px(TAG_BASE.pill, 38),
+      padding:      `0 ${px(24, 14)}px`,
       display:      "flex",
       alignItems:   "center",
       flexShrink:   0,
     }}>
       <span style={{
         fontFamily:     "Inter, sans-serif",
-        fontSize:       18,
+        fontSize:       px(18, 13),
         color:          isActive ? "#fe5732" : "#0b1f3a",
         letterSpacing:  "-0.5px",
         whiteSpace:     "nowrap",
-        lineHeight:     "25px",
+        lineHeight:     px(25, 18) + "px",
         fontWeight:     400,
         transition:     "color 0.15s ease",
       }}>{name}</span>
@@ -120,13 +232,13 @@ const TagMarker = forwardRef<HTMLDivElement, {
   );
 
   const line = (
-    <div style={{ width: 2, height: 75, background: "#fe5732", flexShrink: 0 }} />
+    <div style={{ width: 2, height: px(TAG_BASE.line, 28), background: "#fe5732", flexShrink: 0 }} />
   );
 
   const dot = (
     <div style={{
-      width:      8,
-      height:     8,
+      width:      px(TAG_BASE.dot, 6),
+      height:     px(TAG_BASE.dot, 6),
       borderRadius: 1,
       background: "#fe5732",
       boxShadow:  "0 0 11.4px 4px rgba(254,87,50,0.85)",
@@ -134,18 +246,15 @@ const TagMarker = forwardRef<HTMLDivElement, {
     }} />
   );
 
-  // Only shown for the active city, sitting right next to its pill (above
-  // for "up", below for "down") — margin goes on whichever side actually
-  // faces the pill so the gap is visible instead of trailing off the stack.
-  // overflow:hidden on the wrapper clips the photo to the same radius as the
-  // border, instead of relying on border-radius on the <img> itself (which
-  // doesn't reliably clip content flush with the border corners).
-  const thumbnail = isActive && (
+  // The photo itself — shared between the stacked (mobile/tablet) and
+  // side-by-side (desktop) placements below. overflow:hidden on the wrapper
+  // clips the photo to the same radius as the border, instead of relying on
+  // border-radius on the <img> itself (which doesn't reliably clip content
+  // flush with the border corners).
+  const thumbnailImg = (
     <div style={{
-      width:        206,
+      width:        px(TAG_BASE.thumb, 120),
       flexShrink:   0,
-      marginBottom: isUp ? 8 : 0,
-      marginTop:    isUp ? 0 : 8,
       border:       "1px solid white",
       borderRadius: 8,
       overflow:     "hidden",
@@ -163,6 +272,41 @@ const TagMarker = forwardRef<HTMLDivElement, {
       />
     </div>
   );
+
+  // Stacked layouts (mobile/tablet): thumbnail sits in-flow right next to
+  // its pill (above for "up", below for "down") — margin goes on whichever
+  // side actually faces the pill so the gap is visible instead of trailing
+  // off the stack.
+  const stackedThumbnail = isActive && !sideBySide && (
+    <div style={{
+      marginBottom: isUp ? px(TAG_BASE.gap, 4) : 0,
+      marginTop:    isUp ? 0 : px(TAG_BASE.gap, 4),
+    }}>
+      {thumbnailImg}
+    </div>
+  );
+
+  // Desktop row layout: thumbnail floats beside the pill instead, absolutely
+  // positioned off it so it doesn't affect the pill/line/dot column's own
+  // width/centering (and therefore doesn't shift the anchor point below).
+  const sideBySideThumbnail = isActive && sideBySide && (
+    <div style={{
+      position:  "absolute",
+      top:       "50%",
+      [imgSide === "right" ? "left" : "right"]: "100%",
+      [imgSide === "right" ? "marginLeft" : "marginRight"]: px(TAG_BASE.gap, 4),
+      transform: "translateY(-50%)",
+    }}>
+      {thumbnailImg}
+    </div>
+  );
+
+  const pillGroup = sideBySide ? (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      {pill}
+      {sideBySideThumbnail}
+    </div>
+  ) : pill;
 
   return (
     <div
@@ -188,8 +332,8 @@ const TagMarker = forwardRef<HTMLDivElement, {
       }}
     >
       {isUp
-        ? <>{thumbnail}{pill}{line}{dot}</>
-        : <>{dot}{line}{pill}{thumbnail}</>}
+        ? <>{stackedThumbnail}{pillGroup}{line}{dot}</>
+        : <>{dot}{line}{pillGroup}{stackedThumbnail}</>}
     </div>
   );
 });
@@ -198,7 +342,10 @@ TagMarker.displayName = "TagMarker";
 // ── Globe ────────────────────────────────────────────────────────────────────
 interface CityFrameData { visible: boolean; sx: number; sy: number; }
 
-// Target Y rotation to bring a city to front-center of the globe
+// Target Y rotation to bring a city to front-center of the globe. Solved
+// against the untilted local point: the group's fixed X tilt only mixes
+// Y/Z after this Y rotation is applied (standard Euler 'XYZ' composition),
+// so it never affects world.x — this zeroes world.x regardless of TILT_X.
 function cityTargetY(lon: number, lat: number): number {
   const b = geo3(lon, lat, GLOBE_RADIUS);
   return Math.atan2(-b.x, b.z);
@@ -212,6 +359,10 @@ interface GlobeProps {
   onDragStart: () => void;
 }
 
+// Renders into whatever box its mount div ends up being laid out at (see the
+// CSS aspect-ratio/container-query sizing in App below) — this component just
+// watches that box via ResizeObserver and keeps the renderer/camera in sync,
+// it never dictates its own size.
 function Globe({ onFrameRef, tagHoveredRef, gotoRef, autoStopRef, onDragStart }: GlobeProps) {
   const mountRef = useRef<HTMLDivElement>(null);
 
@@ -394,12 +545,19 @@ function Globe({ onFrameRef, tagHoveredRef, gotoRef, autoStopRef, onDragStart }:
   );
 }
 
-// ── grid ─────────────────────────────────────────────────────────────────────
-const GRID_MARGIN = 80;
-const GRID_GUTTER = 20;
-
 // ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
+  const { w, h }      = useViewportSize();
+  const bp             = getBreakpoint(w);
+  const cfg             = LAYOUTS[bp];
+  const shortViewport  = h < SHORT_VIEWPORT_H;
+  const stacked        = w < STACK_BELOW_W || shortViewport;
+  // Shrink the tag stack further on short viewports so the reserved headroom
+  // (and the globe it makes room for) stays reasonable even when width alone
+  // would otherwise pick a larger scale (e.g. a wide-but-short window).
+  const tagScale        = shortViewport ? Math.min(cfg.tagScale, 0.55) : cfg.tagScale;
+  const reserve         = tagStackReserve(tagScale);
+
   // Stable refs — readable by the animation-loop callback without stale closures
   const tagEls        = useRef<(HTMLDivElement | null)[]>([null, null, null, null]);
   const tagHoveredRef = useRef<boolean>(false);
@@ -407,20 +565,6 @@ export default function App() {
   const autoStopRef   = useRef<boolean>(false);
   const [activeCity, setActiveCity]   = useState<number | null>(null);
   const [hoveredTab, setHoveredTab]   = useState<number | null>(null);
-
-  // Globe must render into a square mount (camera aspect is fixed at 1) — measure
-  // the left half and clamp to whichever of width/height is smaller.
-  const globeHalfRef = useRef<HTMLDivElement>(null);
-  const [globeSize, setGlobeSize] = useState(0);
-  useEffect(() => {
-    const el = globeHalfRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      setGlobeSize(Math.min(el.clientWidth, el.clientHeight));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   const selectCity = useCallback((i: number) => {
     setActiveCity(i);
@@ -459,30 +603,37 @@ export default function App() {
   return (
     <div style={{
       width:               "100vw",
-      height:              "100vh",
+      minHeight:           "100vh",
+      height:              stacked ? "auto" : "100vh",
       background:          BG,
-      display:             "grid",
-      gridTemplateColumns: "repeat(12, 1fr)",
-      columnGap:           GRID_GUTTER,
-      padding:             `0 ${GRID_MARGIN}px`,
-      boxSizing:            "border-box",
-      overflow:             "hidden",
-      position:             "relative",
+      display:             stacked ? "flex" : "grid",
+      flexDirection:       stacked ? "column" : undefined,
+      gridTemplateColumns: stacked ? undefined : `repeat(${cfg.columns}, 1fr)`,
+      columnGap:           stacked ? undefined : cfg.gutter,
+      padding:             stacked ? 0 : `0 ${cfg.margin}px`,
+      boxSizing:           "border-box",
+      overflowX:           "hidden",
+      overflowY:           stacked ? "visible" : "hidden",
+      position:            "relative",
     }}>
-      {/* Left — menu + info card (4 cols). paddingTop anchors the menu at a
-          fixed position. minHeight:0 lets overflowY:auto engage as a fallback
-          (long addresses on short viewports) instead of the grid track
-          growing past 100vh and getting hard-clipped. */}
+      {/* Menu + info card. On row layouts (desktop/tablet) this sits left of the
+          globe at a fixed width; minHeight:0 lets overflowY:auto engage as a
+          fallback (long addresses on short viewports) instead of the grid
+          track growing past 100vh and getting hard-clipped. On the stacked
+          mobile layout it sits below the globe and the page itself scrolls. */}
       <div style={{
-        gridColumn:     "1 / span 4",
-        height:         "100%",
+        gridColumn:     stacked ? undefined : `1 / span ${cfg.menuCols}`,
+        order:          stacked ? 2 : undefined,
+        width:          stacked ? "100%" : undefined,
+        height:         stacked ? "auto" : "100%",
         minHeight:      0,
         display:        "flex",
         flexDirection:  "column",
-        justifyContent: "center",
-        gap:            32,
+        justifyContent: stacked ? "flex-start" : "center",
+        gap:            cfg.menuGap,
         boxSizing:      "border-box",
-        overflowY:      "auto",
+        overflowY:      stacked ? "visible" : "auto",
+        padding:        stacked ? `28px ${cfg.margin}px 48px` : 0,
         zIndex:         20,
       }}>
         {/* Menu */}
@@ -500,16 +651,16 @@ export default function App() {
                 onMouseLeave={() => setHoveredTab(null)}
                 style={{
                   fontFamily:    "'Cabinet Grotesk Variable', sans-serif",
-                  fontSize:      20,
+                  fontSize:      cfg.menuFont,
                   fontWeight:    400,
-                  lineHeight:    "29px",
+                  lineHeight:    `${cfg.menuLineHeight}px`,
                   letterSpacing: "-1px",
                   textAlign:     "left",
                   color,
                   background:    "transparent",
                   border:        "none",
                   borderBottom:  `1px solid ${highlight ? "#fe5732" : "rgba(255,255,255,0.2)"}`,
-                  padding:       "16px 4px",
+                  padding:       cfg.menuPadding,
                   cursor:        "pointer",
                   transition:    "color 0.15s ease, border-color 0.15s ease",
                   outline:       "none",
@@ -539,41 +690,117 @@ export default function App() {
         )}
       </div>
 
-      {/* Right — globe (8 cols), fixed to the viewport height. */}
-      <div ref={globeHalfRef} style={{
-        gridColumn:     "5 / span 8",
-        height:         "100%",
+      {/* Globe panel. On row layouts it fills the remaining columns at full
+          viewport height; on the stacked mobile layout it's a full-width band
+          pinned to the top, sized as a share of the viewport height.
+
+          Sizing/centering is pure CSS (container query units), not a
+          ResizeObserver + React state round-trip — that JS-measured approach
+          was a step behind the real layout on resize and could size or
+          position the globe wrong for a frame (or longer). `container-type:
+          size` turns this panel into a query container; `--box` picks the
+          largest square that fits both its width and (height minus the
+          headroom reserved for an "up" pin's popup). The box itself sits
+          centered in the panel (equal space above/below) — the subtracted
+          reserve just keeps the box small enough that a popup normally has
+          room to pop up into that centered slack without clipping.
+
+          Any stacked layout (globe-on-top, page-scrolling) uses a separate,
+          width-only formula instead: fitting the box to a fixed vh share of
+          the viewport (as row layouts do) only works when the reserve was
+          tuned against that same vh share, and the desktop/tablet reserve
+          values are tuned for full-height row use, not a shrunk vh band —
+          plugged into a vh-band formula they starve the box down to a
+          fraction of its width, which is what was happening here at
+          tablet-width stacked layouts. Sizing off width alone sidesteps
+          that mismatch entirely, and the panel's height becomes auto
+          instead of a viewport-height share, so the reserved headroom is
+          real layout space the page can scroll to rather than space
+          squeezed out of a fixed box. */}
+      <div style={{
+        gridColumn:     stacked ? undefined : `${cfg.menuCols + 1} / span ${cfg.globeCols}`,
+        order:          stacked ? 1 : undefined,
+        width:          stacked ? "100%" : undefined,
+        height:         stacked ? "auto" : "100%",
         display:        "flex",
         alignItems:     "center",
         justifyContent: "center",
         boxSizing:      "border-box",
-      }}>
-        <div style={{ position: "relative", width: globeSize, height: globeSize }}>
-          <Globe onFrameRef={onFrameRef} tagHoveredRef={tagHoveredRef} gotoRef={gotoRef} autoStopRef={autoStopRef} onDragStart={deselectCity} />
+        padding:        stacked ? "24px 0" : 0,
+        // container queries only apply to the row/normal-height sizing
+        // formula below — the stacked-layout box is width-only and doesn't
+        // need a size container (which would otherwise require this panel
+        // to have a definite height, conflicting with height:"auto" above).
+        containerType:  stacked ? undefined : "size",
+        "--box":        stacked ? "min(100%, 420px)" : `min(100cqw, calc(100cqh - ${reserve}px))`,
+      } as CSSVars}>
+        {stacked ? (
+          // Scrolling stacked layout: the reserve is real spacer space
+          // above the box in normal flow, not shared/centered — the page
+          // can just scroll to reveal a popup that needs it.
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "var(--box)" }}>
+            <div style={{ height: reserve, flexShrink: 0 }} />
+            <div style={{ position: "relative", width: "100%", aspectRatio: "1" }}>
+              <Globe onFrameRef={onFrameRef} tagHoveredRef={tagHoveredRef} gotoRef={gotoRef} autoStopRef={autoStopRef} onDragStart={deselectCity} />
 
-          {/* Overlay: same footprint as globe, overflow visible so pill labels can extend outside */}
-          <div style={{
-            position:      "absolute",
-            inset:         0,
-            overflow:      "visible",
-            pointerEvents: "none",
-            zIndex:        5,
-          }}>
-            {CITIES.map((city, i) => (
-              <TagMarker
-                key={i}
-                ref={el => { tagEls.current[i] = el; }}
-                name={city.name}
-                variant={city.variant}
-                isActive={activeCity === i}
-                image={city.image}
-                onMouseEnter={() => markHover(true)}
-                onMouseLeave={() => markHover(false)}
-                onClick={() => selectCity(i)}
-              />
-            ))}
+              {/* Overlay: same footprint as globe, overflow visible so pill labels can extend outside */}
+              <div style={{
+                position:      "absolute",
+                inset:         0,
+                overflow:      "visible",
+                pointerEvents: "none",
+                zIndex:        5,
+              }}>
+                {CITIES.map((city, i) => (
+                  <TagMarker
+                    key={i}
+                    ref={el => { tagEls.current[i] = el; }}
+                    name={city.name}
+                    variant={city.variant}
+                    isActive={activeCity === i}
+                    image={city.image}
+                    scale={tagScale}
+                    sideBySide={false}
+                    imgSide={city.imgSide}
+                    onMouseEnter={() => markHover(true)}
+                    onMouseLeave={() => markHover(false)}
+                    onClick={() => selectCity(i)}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div style={{ position: "relative", width: "var(--box)", aspectRatio: "1" }}>
+            <Globe onFrameRef={onFrameRef} tagHoveredRef={tagHoveredRef} gotoRef={gotoRef} autoStopRef={autoStopRef} onDragStart={deselectCity} />
+
+            {/* Overlay: same footprint as globe, overflow visible so pill labels can extend outside */}
+            <div style={{
+              position:      "absolute",
+              inset:         0,
+              overflow:      "visible",
+              pointerEvents: "none",
+              zIndex:        5,
+            }}>
+              {CITIES.map((city, i) => (
+                <TagMarker
+                  key={i}
+                  ref={el => { tagEls.current[i] = el; }}
+                  name={city.name}
+                  variant={city.variant}
+                  isActive={activeCity === i}
+                  image={city.image}
+                  scale={tagScale}
+                  sideBySide={true}
+                  imgSide={city.imgSide}
+                  onMouseEnter={() => markHover(true)}
+                  onMouseLeave={() => markHover(false)}
+                  onClick={() => selectCity(i)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
